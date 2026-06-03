@@ -192,4 +192,56 @@ public class FeNameFormatTest {
         Assertions.assertDoesNotThrow(() -> FeNameFormat.checkColumnName("$abc!abc"));
     }
 
+    @Test
+    public void testCheckUserName() {
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("root"));
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("_user1"));
+        // kerberos principal/host form (a single optional '/') is accepted, including names whose total length
+        // exceeds 64 -- this used to be wrongly rejected by a hard-coded length() > 64 guard (see #2603).
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("stephen/host01.example.com"));
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("service/" + "a".repeat(60) + ".example.com"));
+        // length boundary: 128 chars accepted, 129 reports ERR_TOO_LONG_IDENT
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("a".repeat(128)));
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "is too long",
+                () -> FeNameFormat.checkUserName("a".repeat(129)));
+        // empty / character violations still report the generic "invalid user name" format error
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid user name",
+                () -> FeNameFormat.checkUserName(""));
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid user name",
+                () -> FeNameFormat.checkUserName("aaa~bbb"));
+        // more than one '/' separator is rejected
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid user name",
+                () -> FeNameFormat.checkUserName("a/b/c"));
+    }
+
+    @Test
+    public void testCheckRoleName() {
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkRoleName("role1", true, "invalid role"));
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkRoleName("_role", true, "invalid role"));
+        // length boundary: 64 chars accepted, 65 reports ERR_TOO_LONG_IDENT
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkRoleName("a".repeat(64), true, "invalid role"));
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "is too long",
+                () -> FeNameFormat.checkRoleName("a".repeat(65), true, "invalid role"));
+        // empty / character violations still report the generic "invalid role format" error
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid role format",
+                () -> FeNameFormat.checkRoleName("___", true, "invalid role"));
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid role format",
+                () -> FeNameFormat.checkRoleName("", true, "invalid role"));
+    }
+
+    @Test
+    public void testCheckLabel() {
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkLabel("label_1"));
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkLabel("my-label"));
+        // length boundary: 128 chars accepted, 129 reports ERR_TOO_LONG_IDENT
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkLabel("a".repeat(128)));
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "is too long",
+                () -> FeNameFormat.checkLabel("a".repeat(129)));
+        // empty / character violations still report the generic "Label format error"
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "Label format error",
+                () -> FeNameFormat.checkLabel("bad label"));
+        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "Label format error",
+                () -> FeNameFormat.checkLabel(""));
+    }
+
 }

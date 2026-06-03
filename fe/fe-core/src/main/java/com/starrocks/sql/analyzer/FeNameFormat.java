@@ -35,15 +35,18 @@ public class FeNameFormat {
     public static final int MAX_TABLE_NAME_LENGTH = 1024;
     public static final int MAX_COLUMN_NAME_LENGTH = 1024;
     public static final int MAX_COMMON_NAME_LENGTH = 64;
+    public static final int MAX_USER_NAME_LENGTH = 128;
+    public static final int MAX_LABEL_LENGTH = 128;
 
-    private static final String LABEL_REGEX = "^[-\\w]{1,128}$";
+    // Character rules only; length is enforced separately via MAX_LABEL_LENGTH in checkLabel.
+    private static final String LABEL_REGEX = "^[-\\w]+$";
 
     public static final char[] SPECIAL_CHARACTERS_IN_DB_NAME = new char[] {'-', '~', '!', '@', '#', '$',
             '%', '^', '&', '<', '>', '=', '+'};
     public static final char[] SPECIAL_CHARACTERS_IN_ICEBERG_NAMESPACE = new char[] {'-', '~', '!', '@', '#', '$',
             '%', '^', '&', '<', '>', '=', '+', '.'};
-    // Length stays encoded in this regex because checkRoleName matches against it directly without going through checkName.
-    public static final String COMMON_NAME_REGEX = "^[a-zA-Z]\\w{0,63}$|^_[a-zA-Z0-9]\\w{0,62}$";
+    // Character rules only; length is enforced separately via MAX_COMMON_NAME_LENGTH (in checkName and checkRoleName).
+    public static final String COMMON_NAME_REGEX = "^[a-zA-Z]\\w*$|^_[a-zA-Z0-9]\\w*$";
 
     // Length is enforced separately via the MAX_*_LENGTH constants (see checkName), so these regexes only describe
     // character rules; over-length names report ERR_TOO_LONG_IDENT instead of the generic wrong-name error.
@@ -58,8 +61,12 @@ public class FeNameFormat {
 
     private static final String SHARED_DATE_COLUMN_NAME_REGEX = "^[^\0]+$";
 
-    // The username by kerberos authentication may include the host name, so additional adaptation is required.
-    private static final String MYSQL_USER_NAME_REGEX = "^\\w{1,64}/?[.\\w-]{0,63}$";
+    // The username by kerberos authentication may include the host name (principal/host), so the format allows a single
+    // optional '/' separator after the leading name. Length is enforced separately via MAX_USER_NAME_LENGTH so that
+    // over-length names report ERR_TOO_LONG_IDENT instead of a misleading "invalid user name" format error. This also
+    // fixes the historical conflict where a hard-coded length() > 64 check rejected kerberos names that the widened
+    // format was meant to accept (introduced together in #2603).
+    private static final String MYSQL_USER_NAME_REGEX = "^\\w+/?[.\\w-]*$";
 
     public static final String FORBIDDEN_PARTITION_NAME = "placeholder_";
 
@@ -99,6 +106,14 @@ public class FeNameFormat {
         }
         if (!name.matches(regex)) {
             ErrorReport.reportSemanticException(wrongNameError, wrongNameArgs);
+        }
+    }
+
+    // Reports ERR_TOO_LONG_IDENT when an identifier exceeds maxLength. Used by the name checks that keep their own
+    // (non-ErrorCode) format messages but should still surface a dedicated over-length error instead of a format error.
+    private static void checkNameLength(String name, int maxLength) {
+        if (name.length() > maxLength) {
+            ErrorReport.reportSemanticException(ErrorCode.ERR_TOO_LONG_IDENT, name, maxLength);
         }
     }
 
@@ -152,19 +167,31 @@ public class FeNameFormat {
     }
 
     public static void checkLabel(String label) {
-        if (Strings.isNullOrEmpty(label) || !label.matches(LABEL_REGEX)) {
+        if (Strings.isNullOrEmpty(label)) {
+            throw new SemanticException("Label format error. regex: " + LABEL_REGEX + ", label: " + label);
+        }
+        checkNameLength(label, MAX_LABEL_LENGTH);
+        if (!label.matches(LABEL_REGEX)) {
             throw new SemanticException("Label format error. regex: " + LABEL_REGEX + ", label: " + label);
         }
     }
 
     public static void checkUserName(String userName) {
-        if (Strings.isNullOrEmpty(userName) || !userName.matches(MYSQL_USER_NAME_REGEX) || userName.length() > 64) {
+        if (Strings.isNullOrEmpty(userName)) {
+            throw new SemanticException("invalid user name: " + userName);
+        }
+        checkNameLength(userName, MAX_USER_NAME_LENGTH);
+        if (!userName.matches(MYSQL_USER_NAME_REGEX)) {
             throw new SemanticException("invalid user name: " + userName);
         }
     }
 
     public static void checkRoleName(String role, boolean canBeAdmin, String errMsg) {
-        if (Strings.isNullOrEmpty(role) || !role.matches(COMMON_NAME_REGEX)) {
+        if (Strings.isNullOrEmpty(role)) {
+            throw new SemanticException("invalid role format: " + role);
+        }
+        checkNameLength(role, MAX_COMMON_NAME_LENGTH);
+        if (!role.matches(COMMON_NAME_REGEX)) {
             throw new SemanticException("invalid role format: " + role);
         }
     }
