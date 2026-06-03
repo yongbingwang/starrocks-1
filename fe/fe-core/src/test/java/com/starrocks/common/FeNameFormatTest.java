@@ -41,6 +41,8 @@ import mockit.Mock;
 import mockit.MockUp;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Random;
 
@@ -194,24 +196,53 @@ public class FeNameFormatTest {
 
     @Test
     public void testCheckUserName() {
-        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("root"));
-        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("_user1"));
-        // kerberos principal/host form (a single optional '/') is accepted, including names whose total length
-        // exceeds 64 -- this used to be wrongly rejected by a hard-coded length() > 64 guard (see #2603).
-        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("stephen/host01.example.com"));
-        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("service/" + "a".repeat(60) + ".example.com"));
         // length boundary: 128 chars accepted, 129 reports ERR_TOO_LONG_IDENT
         Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("a".repeat(128)));
         ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "is too long",
                 () -> FeNameFormat.checkUserName("a".repeat(129)));
-        // empty / character violations still report the generic "invalid user name" format error
+        // kerberos principal/host whose total length exceeds 64 is accepted -- this used to be wrongly rejected by a
+        // hard-coded length() > 64 guard even though the format allowed it (see #2603).
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName("service/" + "a".repeat(60) + ".example.com"));
+    }
+
+    // Covers every branch of MYSQL_USER_NAME_REGEX = ^\w+/?[.\w-]*$ that must be accepted.
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "a",                                     // minimal \w+ (single word char)
+            "root",                                  // \w+ letters only, no slash, no host part
+            "_user1",                                // leading underscore + digits (all \w)
+            "User_123",                              // mixed case + underscore + digit in the principal
+            "123user",                               // \w allows a leading digit (user names differ from db/role here)
+            "user.name",                             // no slash: '.' is consumed by the trailing [.\w-]* group
+            "user-name",                             // no slash: '-' is consumed by the trailing [.\w-]* group
+            "user/",                                 // optional '/' present, host part empty ([.\w-]* matches zero)
+            "stephen/host01.example.com",            // typical kerberos principal/host with dots
+            "HTTP/web-server.example.com",           // uppercase service principal + '-' in the host
+            "svc/my-host.sub_domain.example-1.com"   // host part mixing '.', '-', '_' and word chars
+    })
+    public void testCheckUserNameValidFormats(String userName) {
+        Assertions.assertDoesNotThrow(() -> FeNameFormat.checkUserName(userName));
+    }
+
+    // Covers the inputs MYSQL_USER_NAME_REGEX must reject; all surface the generic "invalid user name" format error.
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "",            // empty (isNullOrEmpty branch)
+            "/host",       // leading '/': \w+ requires at least one leading word char
+            ".host",       // leading '.'
+            "-host",       // leading '-'
+            "a/b/c",       // more than one '/' separator (only a single optional '/' is allowed)
+            "aaa~bbb",     // '~' is outside \w and [.\w-]
+            "user@host",   // '@' not allowed
+            "user host",   // space not allowed in the principal
+            "user/ho st",  // space not allowed in the host part
+            "user/host@x", // '@' not allowed in the host part
+            "user#1",      // '#' not allowed
+            "user!"        // '!' not allowed
+    })
+    public void testCheckUserNameInvalidFormats(String userName) {
         ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid user name",
-                () -> FeNameFormat.checkUserName(""));
-        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid user name",
-                () -> FeNameFormat.checkUserName("aaa~bbb"));
-        // more than one '/' separator is rejected
-        ExceptionChecker.expectThrowsWithMsg(SemanticException.class, "invalid user name",
-                () -> FeNameFormat.checkUserName("a/b/c"));
+                () -> FeNameFormat.checkUserName(userName));
     }
 
     @Test
