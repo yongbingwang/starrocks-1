@@ -40,6 +40,7 @@ cd test && python3 run.py -v
 - Protobuf fields must stay optional/repeated; never add `required` and never reuse ordinals.
 - Thrift fields must stay optional/repeated; never add `required` and never reuse ordinals.
 - User-facing config or metric changes must update the matching docs in `docs/en/` and `docs/zh/` when applicable.
+- StarRocks aims for MySQL compatibility. When a change would alter user-visible SQL behavior — identifier rules and length limits, type coercion, NULL/error handling, error codes and messages, or function/expression semantics — match MySQL's behavior unless there is a deliberate, documented reason to diverge. Flag the behavior change and cite the MySQL reference in the PR, and prefer counting/measuring the way MySQL does (for example, identifier lengths are measured in characters/code points, not bytes or UTF-16 units).
 - When editing any file under `docs/`, read `docs/CLAUDE.md` for documentation-specific rules before making changes.
 
 ## PR Contract
